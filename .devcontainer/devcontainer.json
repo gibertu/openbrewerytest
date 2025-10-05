@@ -1,0 +1,27 @@
+{
+  "name": "OpenBrewery Codespace",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "workspaceFolder": "/workspaces/openbrewerytest",
+  "postCreateCommand": "docker compose build",
+  "postStartCommand": "docker compose up -d",
+  "postStopCommand": "docker compose down",
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": {
+      "label": "Airflow Web UI",
+      "onAutoForward": "openPreview"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [],
+      "settings": {
+        "github.copilot.enable": false,
+        "github.copilot.chat.autoOpen": false
+      }
+    }
+  }
+}
