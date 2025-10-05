@@ -122,14 +122,16 @@
    
    ## Run It in GitHub Codespaces
    Codespaces is the quickest way to review the project; the `.devcontainer` already ships Docker and Python tooling.
-   1. **Create a Codespace** from the repository on main branch.
-      
-      ![Codespace creation screen](docs/images/codespaces-create.png)
-   2. Wait for the container build to finish (~10 minutes on the first run while the Airflow image is assembled).
+   1. **Create a Codespace** from the repository on main branch. 
+   (Click the button below — **do not change any settings**, just click **“Create”** when the page opens)
+
+      [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/gibertu/openbrewerytest)
+
+   3. Wait for the container build to finish (~10 minutes on the first run while the Airflow image is assembled).
       
       ![Codespace build log](docs/images/codespaces-build.png)
-   3. VS Code forwards port `8080` and opens the preview because `onAutoForward` is set to `openPreview`.
-   4. Sign in to Airflow using the default admin credentials (`admin` / `admin`) to monitor the `brewery_medallion_pipeline`. The initialization process automatically unpauses the DAG and launches its first execution.
+   4. VS Code forwards port `8080` and opens the preview because `onAutoForward` is set to `openPreview`.
+   5. Sign in to Airflow using the default admin credentials (`admin` / `admin`) to monitor the `brewery_medallion_pipeline`. The initialization process automatically unpauses the DAG and launches its first execution.
 
       ![Airflow login page](docs/images/airflow-login.png)
    6. Open the **Graph** tab to capture the `bronze`, `silver`, and `gold` tasks running.
