@@ -1,0 +1,149 @@
+# Docker Compose configuration for Airflow pipeline
+# This file defines all services needed to run the brewery data pipeline
+# Common configuration for Airflow services to avoid repetition
+# This anchor is reused by webserver, scheduler, and init services
+x-airflow-common:
+  &airflow-common
+  # Build custom image from Dockerfile instead of using official image
+  # This ensures PySpark and other dependencies are installed
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      AIRFLOW_UID: ${AIRFLOW_UID:-50000}
+      AIRFLOW_GID: ${AIRFLOW_GID:-0}
+  image: my-airflow-brewery:latest
+  
+  env_file:
+    - .env
+
+  environment:
+    # Use LocalExecutor: runs tasks in the same process (simpler than CeleryExecutor)
+    - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+    
+    # Database connection string for PostgreSQL (new namespace removes deprecation warning)
+    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+    
+    # Fernet key for encrypting sensitive data in the database
+    - AIRFLOW__CORE__FERNET_KEY=FB3s_fTz_Bax3a-YkL9eJ3C_aVz_f_b1_kE_d-c-sE0=
+    
+    # Disable example DAGs to keep the UI clean
+    - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    
+# Start DAGs active so they run immediately
+    - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+    
+    # Java configuration for PySpark
+    # PySpark requires Java to run the Spark engine
+    - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+  
+  volumes:
+    # Mount local directories into the container
+    # This allows editing files locally while they're accessible in the container
+    - ./dags:/opt/airflow/dags           # DAG definitions
+    - ./scripts:/opt/airflow/scripts     # ETL scripts
+    - ./data:/opt/airflow/data           # Data lake (bronze/silver/gold)
+    - airflow-logs:/opt/airflow/logs           # Airflow logs
+    - ./tests:/opt/airflow/tests         # Test suite for pytest
+  
+  # Run container with specified user ID to avoid permission issues
+  # ${AIRFLOW_UID:-50000} reads from .env file or defaults to 50000
+  user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+  
+  # Ensure PostgreSQL is healthy before starting Airflow services
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  # PostgreSQL database for Airflow metadata
+  # Stores DAG runs, task instances, connections, variables, etc.
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      # Persist database data across container restarts
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      # Check if PostgreSQL is ready to accept connections
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    restart: always
+
+  # Initialization service that runs once to set up the database
+  # Creates tables and admin user
+  airflow-init:
+    <<: *airflow-common  # Inherit common configuration
+    user: "0:0"
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        # Create necessary directories
+        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/scripts
+        chown -R ${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0} /opt/airflow/logs /opt/airflow/dags /opt/airflow/scripts
+        # Initialize Airflow database (create tables)
+        gosu airflow airflow db init
+        # Create admin user for web interface
+        gosu airflow airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com \
+          --password admin
+        # Ensure pipeline DAG is active and gets an initial run
+        gosu airflow airflow dags unpause brewery_medallion_pipeline || true
+        RUN_ID="initial_$(date -u +%Y%m%dT%H%M%SZ)"
+        gosu airflow airflow dags trigger brewery_medallion_pipeline --run-id "$${RUN_ID}" || true
+
+    restart: on-failure
+  # Airflow web server - provides the UI for monitoring and triggering DAGs
+  # Access at http://localhost:8080
+  airflow-webserver:
+    <<: *airflow-common  # Inherit common configuration
+    command: webserver
+    ports:
+      # Map container port 8080 to host port 8080
+      - "8080:8080"
+    healthcheck:
+      # Verify web server is responding
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
+    depends_on:
+      # Wait for initialization to complete before starting
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Airflow scheduler - orchestrates DAG execution
+  # Monitors DAG directory and schedules tasks based on their dependencies
+  airflow-scheduler:
+    <<: *airflow-common  # Inherit common configuration
+    command: scheduler
+    healthcheck:
+      # Check if scheduler is running properly
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
+    depends_on:
+      # Wait for initialization to complete before starting
+      airflow-init:
+        condition: service_completed_successfully
+
+# Named volumes for data persistence
+volumes:
+  postgres-db-volume:
+  airflow-logs:
+
+
+
+
