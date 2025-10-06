@@ -78,8 +78,13 @@
       - Summaries per country/state/city/brewery_type, counting distinct breweries.
       - Persists both Parquet and single-file CSV so analysts can grab the latest snapshot.
    
-   Airflow wires the stages together with daily scheduling, email alerts powered by Mailtrap credentials, and SLA markers on each task.
+   Airflow wires the stages together with daily scheduling, email alerts powered by Mailtrap credentials, and SLA markers on each task.  
    
+   > 🕒 **Scheduling Note**  
+   > Each DAG run processes the *previous day's* data (`execution_date = D-1`).  
+   > For example, a run triggered at **2025-10-06 03:00 UTC** generates outputs labeled **2025-10-05**.  
+   > This is intentional — Airflow schedules each run *after* its data window has closed, ensuring full-day completeness and consistent daily partitions.
+
    ## Runtime Folder Layout
    After a successful DAG run the workspace contains the following artefacts (example for execution date `2024-01-15`):
    ```
