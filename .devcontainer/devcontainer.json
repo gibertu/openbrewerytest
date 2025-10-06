@@ -5,7 +5,7 @@
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },
   "workspaceFolder": "/workspaces/openbrewerytest",
-  "postCreateCommand": "docker compose build",
+  "postCreateCommand": "bash .devcontainer/post-create.sh && docker compose build",
   "postStartCommand": "docker compose up -d",
   "postStopCommand": "docker compose down",
   "forwardPorts": [8080],
@@ -19,8 +19,6 @@
     "vscode": {
       "extensions": [],
       "settings": {
-        "github.copilot.enable": false,
-        "github.copilot.chat.autoOpen": false
       }
     }
   }
