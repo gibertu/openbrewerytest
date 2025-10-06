@@ -1,89 +1,40 @@
-# Docker Compose configuration for Airflow pipeline
-# This file defines all services needed to run the brewery data pipeline
+version: "3.9"
 
-# ------------------------------------------------------------------------------
-# Auto-create .env if missing (works in both Codespaces and local Docker)
-# ------------------------------------------------------------------------------
-x-pre-build:
-  &pre-build
-  entrypoint: /bin/bash
-  command:
-    - -c
-    - |
-      if [ ! -f .env ]; then
-        echo "⚙️ Creating default .env file..."
-        cat <<EOF > .env
-AIRFLOW_UID=1000
-AIRFLOW_GID=0
-
-# SMTP settings for Airflow alerts (Mailtrap sandbox defaults)
-AIRFLOW__SMTP__SMTP_HOST=sandbox.smtp.mailtrap.io
-AIRFLOW__SMTP__SMTP_PORT=2525
-AIRFLOW__SMTP__SMTP_USER=default_user
-AIRFLOW__SMTP__SMTP_PASSWORD=default_pass
-AIRFLOW__SMTP__SMTP_MAIL_FROM=alerts@example.com
-AIRFLOW__SMTP__SMTP_STARTTLS=True
-AIRFLOW__SMTP__SMTP_SSL=False
-
-# Comma-separated list of alert recipients
-ALERT_EMAILS=user@example.com
-EOF
-        echo "✅ Default .env created successfully."
-      else
-        echo "ℹ️ .env already exists, skipping creation."
-      fi
-      exec sleep infinity
-
-# ------------------------------------------------------------------------------
-# Common configuration for Airflow services (reused across containers)
-# ------------------------------------------------------------------------------
+# -------------------------------
+# COMMON AIRFLOW SERVICE SETTINGS
+# -------------------------------
 x-airflow-common:
   &airflow-common
   build:
     context: .
     dockerfile: Dockerfile
-    args:
-      AIRFLOW_UID: ${AIRFLOW_UID:-50000}
-      AIRFLOW_GID: ${AIRFLOW_GID:-0}
-  image: my-airflow-brewery:latest
-
   env_file:
-    - .env
-
+    - .env  # Environment variables automatically created in Codespaces
   environment:
-    - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-    - AIRFLOW__CORE__FERNET_KEY=FB3s_fTz_Bax3a-YkL9eJ3C_aVz_f_b1_kE_d-c-sE0=
-    - AIRFLOW__CORE__LOAD_EXAMPLES=False
-    - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
-    - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+    AIRFLOW__CORE__FERNET_KEY: ""  # Optional: generated dynamically for encryption
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 60
+    AIRFLOW__CORE__ENABLE_XCOM_PICKLING: "True"
+    AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+    AIRFLOW__WEBSERVER__WORKERS: 2
+    AIRFLOW__SCHEDULER__SCHEDULER_HEARTBEAT_SEC: 10
+    _PIP_ADDITIONAL_REQUIREMENTS: ""
   volumes:
+    # Mount local folders into the Airflow container for DAGs, logs, and scripts
     - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
     - ./scripts:/opt/airflow/scripts
     - ./data:/opt/airflow/data
-    - airflow-logs:/opt/airflow/logs
-    - ./tests:/opt/airflow/tests
-
   user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
-
   depends_on:
-    postgres:
-      condition: service_healthy
+    - postgres
 
+# -------------------------------
+# DATABASE SERVICE
+# -------------------------------
 services:
-  # ----------------------------------------------------------------------------
-  # Utility service to ensure `.env` exists before other containers start
-  # ----------------------------------------------------------------------------
-  ensure-env:
-    <<: *pre-build
-    image: bash
-    volumes:
-      - .:/workspace
-
-  # ----------------------------------------------------------------------------
-  # PostgreSQL database for Airflow metadata
-  # ----------------------------------------------------------------------------
   postgres:
     image: postgres:13
     environment:
@@ -92,78 +43,50 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
-      interval: 5s
-      retries: 5
-    restart: always
 
-  # ----------------------------------------------------------------------------
-  # Airflow database and user initialization
-  # ----------------------------------------------------------------------------
+  # --------------------------------
+  # ONE-TIME INITIALIZATION SERVICE
+  # --------------------------------
   airflow-init:
     <<: *airflow-common
-    user: "0:0"
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/scripts
-        chown -R ${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0} /opt/airflow/logs /opt/airflow/dags /opt/airflow/scripts
-        gosu airflow airflow db init
-        gosu airflow airflow users create \
-          --username admin \
-          --firstname Admin \
-          --lastname User \
-          --role Admin \
-          --email admin@example.com \
-          --password admin
-        gosu airflow airflow dags unpause brewery_medallion_pipeline || true
-        RUN_ID="initial_$(date -u +%Y%m%dT%H%M%SZ)"
-        gosu airflow airflow dags trigger brewery_medallion_pipeline --run-id "$RUN_ID" || true
-    restart: on-failure
-    depends_on:
-      ensure-env:
-        condition: service_started
+    entrypoint: >
+      bash -c "
+      airflow db init &&
+      airflow users create \
+        --username admin \
+        --firstname admin \
+        --lastname admin \
+        --role Admin \
+        --email admin@example.com \
+        --password admin
+      "
+    restart: "no"
 
-  # ----------------------------------------------------------------------------
-  # Airflow webserver - UI and monitoring
-  # ----------------------------------------------------------------------------
+  # -------------------------------
+  # AIRFLOW WEBSERVER SERVICE
+  # -------------------------------
   airflow-webserver:
     <<: *airflow-common
     command: webserver
     ports:
-      - "8080:8080"
+      - "8080:8080"  # Port forwarded automatically in Codespaces
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]
       interval: 10s
       timeout: 10s
-      retries: 10
-      start_period: 30s
+      retries: 5
     restart: always
-    depends_on:
-      airflow-init:
-        condition: service_completed_successfully
 
-  # ----------------------------------------------------------------------------
-  # Airflow scheduler - orchestrates DAG execution
-  # ----------------------------------------------------------------------------
+  # -------------------------------
+  # AIRFLOW SCHEDULER SERVICE
+  # -------------------------------
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
-    healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     restart: always
-    depends_on:
-      airflow-init:
-        condition: service_completed_successfully
 
-# ------------------------------------------------------------------------------
-# Persistent volumes
-# ------------------------------------------------------------------------------
+# -------------------------------
+# NAMED VOLUMES
+# -------------------------------
 volumes:
   postgres-db-volume:
-  airflow-logs:
