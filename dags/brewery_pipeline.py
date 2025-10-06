@@ -106,11 +106,11 @@ with DAG(
     dag_id='brewery_medallion_pipeline',
     default_args=default_args,
     description='Extract brewery data and process through medallion architecture',
-    schedule_interval='@daily',            # Run once per day
-    start_date=datetime(2024, 1, 1),      # Backfill start date
-    catchup=False,                         # Don't backfill historical dates
+    schedule_interval='0 3 * * *',        # Run daily at 03:00 UTC
+    start_date=datetime(2024, 1, 1),      # Backfill start date (UTC)
+    catchup=False,                        # Don't backfill historical dates
     tags=['brewery', 'medallion', 'etl'], # Tags for DAG organization
-    max_active_runs=1,                     # Prevent concurrent runs
+    max_active_runs=1,                    # Prevent concurrent runs
 ) as dag:
     
     # Bronze Layer: Extract raw data from API
