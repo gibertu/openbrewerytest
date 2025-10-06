@@ -102,7 +102,7 @@ services:
         gosu airflow airflow dags trigger brewery_medallion_pipeline --run-id "$${RUN_ID}" || true
 
     restart: on-failure
-  # Airflow web server - provides the UI for monitoring and triggering DAGs
+ # Airflow web server - provides the UI for monitoring and triggering DAGs
   # Access at http://localhost:8080
   airflow-webserver:
     <<: *airflow-common  # Inherit common configuration
@@ -113,15 +113,15 @@ services:
     healthcheck:
       # Verify web server is responding
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s        # check every 10 seconds
+      timeout: 10s         # give it up to 10s to respond
+      retries: 10          # wait up to ~100 seconds total
+      start_period: 30s    # initial grace period before first check
     restart: always
     depends_on:
       # Wait for initialization to complete before starting
       airflow-init:
         condition: service_completed_successfully
-
   # Airflow scheduler - orchestrates DAG execution
   # Monitors DAG directory and schedules tasks based on their dependencies
   airflow-scheduler:
